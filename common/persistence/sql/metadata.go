@@ -46,18 +46,27 @@ func (m *sqlMetadataManagerV2) CreateNamespace(
 		if err != nil {
 			return err
 		}
-		if _, err := tx.InsertIntoNamespace(ctx, &sqlplugin.NamespaceRow{
+		result, err := tx.InsertIntoNamespace(ctx, &sqlplugin.NamespaceRow{
 			Name:                request.Name,
 			ID:                  idBytes,
 			Data:                request.Namespace.Data,
 			DataEncoding:        request.Namespace.EncodingType.String(),
 			IsGlobal:            request.IsGlobal,
 			NotificationVersion: metadata.NotificationVersion,
-		}); err != nil {
+		})
+		if err != nil {
 			if m.DB.IsDupEntryError(err) {
 				return serviceerror.NewNamespaceAlreadyExistsf("name: %v", request.Name)
 			}
 			return err
+		}
+		// PostgreSQL uses ON CONFLICT DO NOTHING and reports zero rows on a duplicate.
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if rowsAffected == 0 {
+			return serviceerror.NewNamespaceAlreadyExistsf("name: %v", request.Name)
 		}
 		if err := updateMetadata(ctx,
 			tx,

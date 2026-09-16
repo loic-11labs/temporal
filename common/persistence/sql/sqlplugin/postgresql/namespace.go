@@ -12,7 +12,8 @@ import (
 const (
 	createNamespaceQuery = `INSERT INTO 
  namespaces (partition_id, id, name, is_global, data, data_encoding, notification_version)
- VALUES($1, $2, $3, $4, $5, $6, $7)`
+ VALUES($1, $2, $3, $4, $5, $6, $7)
+ ON CONFLICT DO NOTHING`
 
 	updateNamespaceQuery = `UPDATE namespaces 
  SET name = $1, data = $2, data_encoding = $3, is_global = $4, notification_version = $5
