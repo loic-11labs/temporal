@@ -1487,9 +1487,7 @@ func (s *PartitionManagerTestSuite) TestLogicalBacklogMetrics_BreakdownByBuildID
 	})
 	defer cleanup()
 
-	// Disable BreakdownMetricsByBuildID. When disabled, versioned entries would all share the
-	// "__versioned__" tag, producing non-deterministic gauge values. The function should skip
-	// versioned entries and only emit the unversioned metric.
+	// Without the breakdown, versioned backlogs are merged into one "__versioned__" series.
 	pm.config.BreakdownMetricsByBuildID = func() bool { return false }
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -1510,8 +1508,8 @@ func (s *PartitionManagerTestSuite) TestLogicalBacklogMetrics_BreakdownByBuildID
 		snap := capture.Snapshot()
 
 		// Unversioned should still be emitted (with attributed count = 0 since current takes all).
-		_, unvOk := latestLogicalBacklogCount(snap, "__unversioned__", defaultPriorityTag)
-		if !unvOk {
+		unvCount, unvOk := latestLogicalBacklogCount(snap, "__unversioned__", defaultPriorityTag)
+		if !unvOk || unvCount != 0 {
 			return false
 		}
 
@@ -1524,9 +1522,8 @@ func (s *PartitionManagerTestSuite) TestLogicalBacklogMetrics_BreakdownByBuildID
 			return false // should not be present
 		}
 
-		// Also should not appear under the generic "__versioned__" tag, since we skip entirely.
-		_, genericOk := latestLogicalBacklogCount(snap, "__versioned__", defaultPriorityTag)
-		return !genericOk
+		genericCount, genericOk := latestLogicalBacklogCount(snap, "__versioned__", defaultPriorityTag)
+		return genericOk && genericCount == float64(5)
 	}, 2*time.Second, 50*time.Millisecond)
 }
 

@@ -1646,6 +1646,10 @@ func (pm *taskQueuePartitionManagerImpl) emitLogicalBacklogMetrics(ctx context.C
 	}
 }
 
+// mergedVersionsBacklogKey holds the backlog of all versions when BreakdownMetricsByBuildID is disabled.
+// Any non-empty key without the deployment delimiter is tagged "__versioned__" with empty deployment tags.
+const mergedVersionsBacklogKey = "__versioned__"
+
 // fetchAndEmitLogicalBacklogMetrics calls Describe to get attributed backlog stats and emits
 // approximate_backlog_count and approximate_backlog_age_seconds per version and task priority.
 // These metrics reflect versioning attribution: for current/ramping versions, a proportional
@@ -1664,16 +1668,30 @@ func (pm *taskQueuePartitionManagerImpl) fetchAndEmitLogicalBacklogMetrics(ctx c
 	}
 
 	emitted := make(map[string]*taskqueuespb.TaskQueueVersionInfoInternal)
+	breakdownByBuildID := pm.config.BreakdownMetricsByBuildID()
 	for versionKey, vInfo := range resp.GetVersionsInfoInternal() {
-		// When BreakdownMetricsByBuildID is disabled, all versioned queues share the same
-		// "__versioned__" tag value. Since gauges overwrite on each Record() call, emitting
-		// multiple versions under the same tag would produce non-deterministic results.
-		// Skip versioned entries in this case; unversioned attributed metrics are still emitted.
-		if versionKey != "" && !pm.config.BreakdownMetricsByBuildID() {
+		// Without the breakdown, all versions share the "__versioned__" series. Gauges overwrite
+		// on each Record(), so merge them into one entry: summed count, oldest age.
+		if versionKey != "" && !breakdownByBuildID {
+			merged, ok := emitted[mergedVersionsBacklogKey]
+			if !ok {
+				merged = &taskqueuespb.TaskQueueVersionInfoInternal{
+					PhysicalTaskQueueInfo: &taskqueuespb.PhysicalTaskQueueInfo{
+						TaskQueueStatsByPriorityKey: make(map[int32]*taskqueuepb.TaskQueueStats),
+					},
+				}
+				emitted[mergedVersionsBacklogKey] = merged
+			}
+			mergeStatsByPriority(
+				merged.GetPhysicalTaskQueueInfo().GetTaskQueueStatsByPriorityKey(),
+				vInfo.GetPhysicalTaskQueueInfo().GetTaskQueueStatsByPriorityKey(),
+			)
 			continue
 		}
-
 		emitted[versionKey] = vInfo
+	}
+
+	for versionKey, vInfo := range emitted {
 		pqInfo := vInfo.GetPhysicalTaskQueueInfo()
 		versionHandler := pm.logicalBacklogHandler(versionKey)
 
